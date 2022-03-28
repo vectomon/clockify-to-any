@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using Clockify.Net;
+using Clockify.Net.Models.Projects;
 using Clockify.Net.Models.TimeEntries;
 using Clockify.Net.Models.Users;
 using Clockify.Net.Models.Workspaces;
@@ -19,7 +20,13 @@ namespace clockify_to_any.core
             InitClient(args);
             var user = GetUser();
             var workspace = GetWorkspace();
-            HandleTimeEntries(workspace, user);
+            var projects = GetProjects(workspace);
+            HandleTimeEntries(workspace, user, projects);
+        }
+
+        static Dictionary<string, ProjectDtoImpl> GetProjects(WorkspaceDto workspace)
+        {
+            return Client.FindAllProjectsOnWorkspaceAsync(workspace.Id).Result.Data.ToDictionary(p => p.Id, p => p);
         }
 
         static void InitClient(string[] args)
@@ -65,23 +72,22 @@ namespace clockify_to_any.core
             return selectedWorkspace;
         }
 
-        static void HandleTimeEntries(WorkspaceDto workspace, CurrentUserDto user)
+        static void HandleTimeEntries(WorkspaceDto workspace, CurrentUserDto user, Dictionary<string, ProjectDtoImpl> projects)
         {
             Console.WriteLine("Időbejegyzések lekérdezése...");
             var entries = Client.FindAllTimeEntriesForUserAsync(workspace.Id, user.Id).Result.Data;
 
-            var tmpFilePath = CreateEntryFile(entries);
-            ProcessStartInfo psi = new ProcessStartInfo(tmpFilePath)
+            var tmpFilePath = CreateEntryFile(entries, projects);
+            ProcessStartInfo editorPsi = new ProcessStartInfo("code", tmpFilePath)
             {
                 UseShellExecute = true
             };
 
-            var p = System.Diagnostics.Process.Start(psi);
-            System.Console.WriteLine(p.Id);
-            System.Threading.Thread.Sleep(500000);
+            var editorProcess = Process.Start(editorPsi);
+            editorProcess.WaitForExit();
         }
 
-        static string CreateEntryFile(List<TimeEntryDtoImpl> entries)
+        static string CreateEntryFile(List<TimeEntryDtoImpl> entries, Dictionary<string, ProjectDtoImpl> projects)
         {
             Console.WriteLine("Kérlek, határozd meg a sorsukat az alapértelmezett szövegszerkesztődben!");
 
@@ -90,11 +96,19 @@ namespace clockify_to_any.core
             File.WriteAllLines(tmpFilePath, new List<string>()
             {
                 "Kérlek, határozd meg a bejegyzések sorsát az alábbi táblázat segítségével:",
-                "asd"
+                "(s)kip - feldolgozás során nem lesz figyelembe véve",
+                "(r)edmine - redmine-ba könyvelhető",
+                "(d)elete - csak törlés",
+                "A time-tracking platformok közül többet is meg lehet adni!",
+                "PL: ",
+                ""
             });
 
 
-            File.WriteAllLines(tmpFilePath, entries.Select(entry => entry.Description));
+            File.AppendAllLines(tmpFilePath, entries.Select(entry =>
+            {
+                return $"r - {entry.Description} - {projects[entry.ProjectId].Name}";
+            }));
 
             return tmpFilePath;
         }
